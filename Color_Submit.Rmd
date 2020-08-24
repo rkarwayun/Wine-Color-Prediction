@@ -1,0 +1,447 @@
+---
+title: "MSCI 718 - Assignment 3"
+author: "Rishabh Karwayun and Karan Kohli"
+date: "28/03/2020"
+output: pdf_document
+sansfont: Calibri Light
+classoption: 10pt
+---
+\fontsize{9}{15}
+\fontseries{b}
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in your analysis in this code chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk.
+# This prevents the code from displaying in the knitted HTML output.
+# You should set echo=FALSE for all code chunks in your file.
+
+library(ggplot2)
+library(GGally)
+library(scales)
+library(memisc)
+library(gridExtra)
+library(psych)
+library(plyr)
+library(corrplot)
+library(tidyverse)
+library(dplyr)
+library(pastecs)
+library(car)
+library(pscl)
+```
+
+# Introduction
+
+We have two datasets that are related to red and white variants of the Portuguese "Vinho Verde" wine. Due to privacy and logistic issues, only physicochemical (inputs) and sensory (the output) variables are given (e.g. there is no data about grape types, wine brand, wine selling price, etc.)[1]. We aim to build a model that can predict the color of wine based on its other characteristics.
+
+```{r echo=FALSE, Load_the_Data}
+# Load the Data
+# redwine <- read.csv("E:\\Study\\Waterloo\\MSCI718\\Ass3\\winequality-red.csv", sep = ";")
+redwine <- read.csv("/Users/rkarwayun/Desktop/UWaterloo/Winter 2020/MSCI 718/Assignments/Assignment 3/winequality-red.csv", sep = ";")
+whitewine <- read.csv("/Users/rkarwayun/Desktop/UWaterloo/Winter 2020/MSCI 718/Assignments/Assignment 3/winequality-white.csv", sep = ";")
+# whitewine <- read.csv("E:\\Study\\Waterloo\\MSCI718\\Ass3\\winequality-white.csv", sep = ";")
+```
+
+```{r echo=FALSE, removing_X}
+redwine$X <- NULL
+whitewine$X <- NULL
+
+redwine$type <- 1
+whitewine$type <- 0
+
+wines <- rbind(redwine, whitewine)
+
+wines$type <- factor(wines$type)
+```
+
+```{r echo=FALSE, Change_quality_to_Factor_Variable}
+wines$quality <- factor(wines$quality, levels = c("3", "4", "5", "6", "7", "8", "9"))
+```
+
+```{r echo=FALSE, orderfactor_quality}
+wines$quality <- ordered(wines$quality, levels = c("3", "4", "5", "6", "7", "8", "9"))
+wines <- wines[! duplicated(wines), ]
+```
+
+```{r echo=FALSE, include=FALSE}
+str(wines)
+summary(wines)
+sum(is.na(wines))
+```
+```{r echo=FALSE, include=FALSE}
+desc_stat <- stat.desc(wines)
+desc_stat
+#dim(desc_stat)
+is.num <- sapply(desc_stat, is.numeric)
+desc_stat[is.num] <- lapply(desc_stat[is.num], round, 1)
+
+# transpose
+desc_stat_t <- t(desc_stat)
+colnames(desc_stat_t) <- rownames(desc_stat)
+rownames(desc_stat_t) <- colnames(desc_stat)
+desc_stat_t
+# select statistics
+desc_stat_t[c(1:11), c(4,5,6,8,9,13)]
+```
+
+
+# Data Exploration
+
+Both the datasets were combined to result in a single dataset containing information for both red and white wines. There were some duplicate values in the data which were removed. The classes in the data are ordered but not balanced. For example, there are almost 4000 observations of white wine and close to 1300 observations of red wine as we can see from the barplot below.
+
+```{r echo=FALSE, fig.height=3, fig.width=7, warning=FALSE}
+
+ggplot(aes(x = type), data = wines) +
+  geom_histogram(stat = 'count', aes(fill = type)) +
+  xlab('Type') +
+  scale_fill_brewer(type = 'qual') +
+  ggtitle('Distribution of Qualities of White (0) and Red (1) Wines in the Wine Data Set') +
+  theme(text = element_text(size = 10)) + labs(caption = "Fig(1)")
+```
+
+In total, there are 5320 observations of 13 variables in the dataset. Out of these, 'type' is a binary variable with values as “0” signifying white wine and “1” for red wine whereas 'quality' is an ordinal variable which takes values in the form of natural numbers ranging from 3 to 9 in increasing order of better quality. Both of these are represented as factor variables. Rest of the variables are continuous and are represented using decimal values.
+
+We observe that there are no NA values in the data. From the boxplots (Fig(2) and Appendix 8), we observe that all features apart from 'alcohol' have significant number of outlier values. In order to ensure that our model is not influenced by outliers, we remove all observations that lie outside of 3 standard deviations from its mean. After removing the outliers, our data now has 4886 obervations.
+
+From the summary of data (Appendix 1), we can see that'chlorides' has a mean value of 0.05 with standard deviation as 0.02. pH has a mean value of 3.22 with a standard deviation of 0.01. 'volatile.acidity' has 0.33 and 0.15 as mean and standard deviation respectively. 
+
+```{r echo=FALSE, fig.height=6, fig.width=10, warning=FALSE}
+b1 <- ggplot(aes(y = fixed.acidity, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Fixed Acidity, g tartaric acid/L') +
+  ggtitle('Fixed acidity') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b2 <- ggplot(aes(y = volatile.acidity, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Volatile Acidity, g acetic acid/L') +
+  ggtitle('Volatile acidity') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b3 <- ggplot(aes(y = citric.acid, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Citric Acid, g/L') +
+  ggtitle('Citric acid') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b7 <- ggplot(aes(y = total.sulfur.dioxide, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Total Sulfur Dioxide, mg/L') +
+  ggtitle('Total Sulfur Dioxide') +
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b9 <- ggplot(aes(y = pH, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ggtitle('pH') +
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b10 <- ggplot(aes(y = sulphates, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Sulphates, g potassium sulphate/L') +
+  ggtitle('Sulphates') +
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b11 <- ggplot(aes(y = alcohol, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Alcohol, % by volume') +
+  ggtitle('Alcohol') +
+  theme(text = element_text(size = 10), legend.position = "none")
+
+grid.arrange(b1,b2,b3,b7,b9,b10,b11, ncol = 4, nrow = 2, top = "Boxplots of Features", bottom = "Fig(2)")
+```
+
+```{r include=FALSE, removing_outliers}
+str(wines)
+wines <- wines[!abs(wines$fixed.acidity-mean(wines$fixed.acidity)) > 3*sd(wines$fixed.acidity), ]
+wines <- wines[!abs(wines$volatile.acidity-mean(wines$volatile.acidity)) > 3*sd(wines$volatile.acidity), ]
+wines <- wines[!abs(wines$citric.acid-mean(wines$citric.acid)) > 3*sd(wines$citric.acid), ]
+wines <- wines[!abs(wines$residual.sugar-mean(wines$residual.sugar)) > 3*sd(wines$residual.sugar), ]
+wines <- wines[!abs(wines$chlorides-mean(wines$chlorides)) > 3*sd(wines$chlorides), ]
+wines <- wines[!abs(wines$free.sulfur.dioxide-mean(wines$free.sulfur.dioxide)) > 3*sd(wines$free.sulfur.dioxide), ]
+wines <- wines[!abs(wines$total.sulfur.dioxide-mean(wines$total.sulfur.dioxide)) > 3*sd(wines$total.sulfur.dioxide), ]
+wines <- wines[!abs(wines$density-mean(wines$density)) > 3*sd(wines$density), ]
+wines <- wines[!abs(wines$pH-mean(wines$pH)) > 3*sd(wines$pH), ]
+wines <- wines[!abs(wines$sulphates-mean(wines$sulphates)) > 3*sd(wines$sulphates), ]
+wines <- wines[!abs(wines$alcohol-mean(wines$alcohol)) > 3*sd(wines$alcohol), ]
+str(wines)
+```
+
+From the histograms below (Fig(3)), we see that most of the variables are normally distributed with some negative skewness being observed in the variables like residual.sugar, volatile.acidity and chlorides.
+
+To explore correlations in our data, we plot a **heatmap** (Appendix 4) and find that the highest correlation exists between `chlorides` and `type` (0.54) and `total.sulfur.dioxide` and `type`. `Alcohol` seems to have very little correlation with `type`. 
+
+```{r echo=FALSE, fig.height=4, fig.width=10, message=FALSE, warning=FALSE}
+wine_plots <- wines %>% select(-quality, -type)
+melt_wine <- gather(wine_plots) # melt data to plot
+
+ggplot(gather(melt_wine), aes(value)) + 
+    geom_histogram(color = "white") + 
+    facet_wrap(~key, scales = "free") + labs(caption = "Fig(3)") + ggtitle("Histograms of Features")
+
+```
+
+# Assumptions and Building a Model:
+
+In the given data, ‘type’ and ‘quality’ can be considered as outcome variables and rest of the features can be considered as predictor variables. It would be interesting to figure if the type of the wine (red or white) can be predicted based on its features. We can do regression to create such model. Since the outcome variable (type) is binary and not continuous, we are using Logistic Regression to create a prediction model. The analysis is interpretable with White Wine (type = '0') as the default case.
+
+```{r  include=FALSE, warning=FALSE}
+model.1 <- glm(type ~ . -quality, data = wines, family=binomial(link = "logit"))
+step(model.1, direction="backward")
+```
+
+We first create an initial model while considering all the features (we do not consider 'quality' to be a feature hence we do not consider it in our analysis). To make our model efficient we eliminate variables that do not contribute significantly to the model. We use the Backward Step method for this. Reason behind choosing this method is that all subset method grows exponentially in complexity based on the number of variables. Since we have a sizeable number of features, we proceed with backward step model. We observe that the following variables: 'sulphates' was found to be non-significant, hence we remove this feature from our consideration. We can look at the model and step results in the Appendix 2.
+
+```{r include = FALSE, warning=FALSE}
+wines_model <- glm(type ~ . -quality -sulphates, data = wines, family=binomial(link = "logit"))
+summary(wines_model)
+```
+
+Now, we move on to check the assumptions of the Logistic Regression Model:
+
+## Assumptions:
+1) **Multicollinearity**: We inspected the VIF (Variance Inflation Factor) to investigate multicollinearity. The largest value of VIF was 10.384382 for 'density', which is more than 10. Hence, we remove 'density' feature from our model[2] and calculate VIF values again. The largest value of VIF in the new model is 2.21192 for 'total.sulfur.dioxide'. The lowest tolerance (1/VIF) was 0.4520959, which is more than 0.1 (which indicates a serious problem) and 0.2 (which indicates a poential problem). Therefore, we proceed ahead with the assumption that there is no collinearity in the data.
+2) **Linearity of Logit**: Based on the test for linearity (Appendix 5), we observe that features 'volatile.acidity', 'chlorides',  'total.sulfuric.dioxide' and 'pH' have p-values less than 0.05. But from the summary of our model (Appendix 3), we observe that these variables have a significant contribution in explaining the variance of the data [3]. This can also be seen from the correlation heatmap (Appendix 4). We understand that is a limitation, but we do not remove these variables and proceed with the assumption of linearity. 
+3) **Independence Of Errors**: The Durbin-Watson test for independent errors was not significant at the 5% level of significance (d=1.65). As d is close to 2 (which would indicate no autocorrelation detected)[4], and we assume that the data was sampled independently, therefore we do not reject the null hypothesis (that the errors are independent), and continue with the assumption of independence met.
+4) **Categorical Outcome**: Our outcome variable (type) is categorical.
+5) **Independent Observations**: All duplicate values were removed hence all observations are independent.
+6) **Large Sample Size**: There are 4886 observations in the dataset.
+7) **Complete Separation**: From the scatter plots in Appendix 7, we can see that there is no complete separation in the data and hence this assumption does not get violated. 
+```{r include = FALSE, warning=FALSE}
+##Multicollinearity
+print("VIF Values:")
+vif(wines_model)
+print("Tolerance:")
+1 / vif(wines_model)
+```
+```{r, include=FALSE}
+max(vif(wines_model))
+min(1/vif(wines_model))
+mean(vif(wines_model))
+```
+
+```{r, include=FALSE}
+wines_model <- glm(type ~ . -quality -sulphates -density, data = wines, family=binomial(link = "logit"))
+print("VIF Values:")
+vif(wines_model)
+print("Tolerance:")
+1 / vif(wines_model)
+max(vif(wines_model))
+min(1/vif(wines_model))
+mean(vif(wines_model))
+```
+
+```{r  include=FALSE, warning=FALSE}
+##Linearity of Logit
+wines_test <- wines
+wines_test$logFixedAcidity <- log(wines$fixed.acidity)*wines$fixed.acidity
+wines_test$logVolatileAcidity <- log(wines$volatile.acidity)*wines$volatile.acidity
+wines_test$logCitricAcid <- log(wines$citric.acid)*wines$citric.acid
+wines_test$logResdiualSugar <- log(wines$residual.sugar)*wines$residual.sugar
+wines_test$logChlorides <- log(wines$chlorides)*wines$chlorides
+wines_test$logFreeSO2 <- log(wines$free.sulfur.dioxide)*wines$free.sulfur.dioxide
+wines_test$logTotalSO2 <- log(wines$total.sulfur.dioxide)*wines$total.sulfur.dioxide
+# wines_test$logDensity <- log(wines$density)*wines$density
+wines_test$logpH <- log(wines$pH)*wines$pH
+# wines_test$logSulphates <- log(wines$sulphates)*wines$sulphates
+wines_test$logAlcohol <- log(wines$alcohol)*wines$alcohol
+wines_linearity_test <- glm(type ~ . -quality -sulphates -density, data = wines_test, family=binomial(link = "logit"))
+summary(wines_linearity_test)
+```
+
+```{r include=FALSE, warning=FALSE}
+##IndependenceOfErrors
+durbinWatsonTest(wines_model)
+```
+
+## Checking for Outliers and Influential Points
+```{r include=FALSE, echo=FALSE}
+##Outliers
+wines_test2 <- wines
+wines_test2$fitted <- wines_model$fitted.values
+wines_test2$residuals <- wines_model$residuals
+wines_test2$standardized.residuals <- rstandard(wines_model)
+possible.outliers <- subset(wines_test2, standardized.residuals < -1.96 | standardized.residuals > 1.96)
+possible.outliers
+```
+
+We found 23 residuals are above or below 1.96 standard deviations. As this represents approximately 0.5% of the observations, which are expected if the residuals are normal (5% of data is expected to be outside of 2 standard deviations), hence we do not consider any of these observations as outliers and continued with all observations included in the model.
+
+We find that no observation is having a Cook's distance of more than '1'. Hence, we conclude that there are no influential cases in our model.
+
+```{r include=FALSE, fig.height=4, fig.width=8}
+##Influential Cases
+wines_test2$cooks <- cooks.distance(wines_model)
+plot(sort(wines_test2$cooks, decreasing=TRUE))
+influential_cases <- subset(wines_test2, cooks>1)
+influential_cases
+```
+# Model Analysis and Interpretation
+
+## Hypothesis
+**H0**: Coefficients of predictor variables in the Logistic Regression model are zero.
+
+**Ha**: Coefficients of predictor variables in the Logistic Regression model are non-zero.
+
+Based on the calculated co-efficients and their p-values, we reject Null Hypothesis and conclude that our model is significant. The model is summarized in Appendix 3. To interpret the co-efficients, we converted them to odd-ratio using exponentials.
+
+## Interpretation:
+```{r echo=FALSE, warnings=FALSE, message=FALSE}
+final_model <- glm(type ~ . -quality -sulphates -density, data = wines, family=binomial(link = "logit"))
+# round(exp(cbind("Odds ratio" = coef(final_model), confint.default(final_model, level = 0.95))), 4)
+# round(confint(final_model),4)
+odds_ratio <- round(exp(coef(final_model)), 30)
+confIntervals <- round(confint(final_model), 4)
+cbind(odds_ratio, confIntervals)
+# summary(final_model)
+```
+
+Using confidence intervals, we can see that the intercept is between -79.96 and -58.57, which does not overlap one. This means there is a significant difference between the odds of wine being White and Red in general, at the 5% level of significance.
+Also, we can conclude that none of the intervals for features overlap '1', indicating that all the features have some impact on the wine type, at 5% level of significance. Odds ratio is a measure of effect size of the feature on the outcome. Based on the Odds ratio, we observe that 'chlorides' has a significant impact on the outcome.
+
+From the Residuals vs Fitted graph in Appendix 6, we can see that there is a separation based on color but the linearity of model can be seen and the homosedastic nature of the data can be visualised. Also, we observe that most of the points lie on the fitted line which indicates a decent fit of the data.
+
+## Conclusion and Future Work:
+We conclude that quality of a wine can be significantly predicted by 'chlorides', 'pH' and 'volatile.acidity' along with some impact by rest of the variables that were included in the final model. As no confidence interval has 1 lying in its range, direction of the Odd's Interval can be considered reliable. Our model achieved an AIC value of 470.
+
+A possible future work could be separating the model into train and test sets and finding the prediction accuracy of our model on unseen test data. Also as we observed in the data, the spread of the observations amongst wine types is not symmetrical. If possible, more data should be collected, or sampling could be done so as to have symmetry amongst different wine types which may lead to a more reliable model. 
+
+
+
+```{r include=FALSE}
+plot(final_model)
+
+summary(final_model)
+```
+
+
+
+
+# Appendix
+
+## References
+
+1: https://archive.ics.uci.edu/ml/datasets/Wine+Quality
+
+2: https://www.statisticssolutions.com/assumptions-of-multiple-linear-regression/
+
+3: http://logisticregressionanalysis.com/758-understanding-logistic-regression-output-part-2-which-variables-matter/
+
+4: https://www.lexjansen.com/wuss/2018/130_Final_Paper_PDF.pdf
+
+## Contributions
+Both of us explored the dataset and brainstormed together to get to the final choice of model. Then, Karan Kohli worked on the coding part of making the data and getting regression model while Rishabh worked on compiling the work and writing it into the report. 
+
+## Appendix 1
+```{r echo=FALSE}
+str(wines)
+summary(wines)
+desc_stat <- stat.desc(wines)
+#dim(desc_stat)
+is.num <- sapply(desc_stat, is.numeric)
+desc_stat[is.num] <- lapply(desc_stat[is.num], round, 1)
+
+# transpose
+desc_stat_t <- t(desc_stat)
+colnames(desc_stat_t) <- rownames(desc_stat)
+rownames(desc_stat_t) <- colnames(desc_stat)
+# select statistics
+desc_stat_t[c(1:11), c(4,5,6,8,9,13)]
+print("NA Values:")
+sum(is.na(wines))
+```
+
+## Appendix 2
+```{r  echo=FALSE, warning=FALSE}
+model.1 <- glm(type ~ . -quality, data = wines, family=binomial(link = "logit"))
+step(model.1, direction="backward")
+```
+
+## Appendix 3
+```{r echo=FALSE, warning=FALSE}
+wines_model <- glm(type ~ . -quality -sulphates -density, data = wines, family=binomial(link = "logit"))
+summary(wines_model)
+```
+
+## Appendix 4
+```{r echo=FALSE, fig.height=7, fig.width=7}
+wines_corr <- wines %>% mutate(type = as.integer(type))
+RW <- cor(subset(wines_corr, select = - c(quality, sulphates, density)), method = "kendall")
+corrplot(RW, method = "number")
+```
+
+## Appendix 5
+```{r echo=FALSE, message=FALSE, warning=TRUE}
+wines_test <- wines
+wines_test$logFixedAcidity <- log(wines$fixed.acidity)*wines$fixed.acidity
+wines_test$logVolatileAcidity <- log(wines$volatile.acidity)*wines$volatile.acidity
+wines_test$logCitricAcid <- log(wines$citric.acid)*wines$citric.acid
+wines_test$logResdiualSugar <- log(wines$residual.sugar)*wines$residual.sugar
+wines_test$logChlorides <- log(wines$chlorides)*wines$chlorides
+wines_test$logFreeSO2 <- log(wines$free.sulfur.dioxide)*wines$free.sulfur.dioxide
+wines_test$logTotalSO2 <- log(wines$total.sulfur.dioxide)*wines$total.sulfur.dioxide
+# wines_test$logDensity <- log(wines$density)*wines$density
+wines_test$logpH <- log(wines$pH)*wines$pH
+# wines_test$logSulphates <- log(wines$sulphates)*wines$sulphates
+wines_test$logAlcohol <- log(wines$alcohol)*wines$alcohol
+wines_linearity_test <- glm(type ~ . -quality -sulphates -density, data = wines_test, family=binomial(link = "logit"))
+summary(wines_linearity_test)
+```
+
+## Appendix 6
+```{r echo = FALSE}
+plot(final_model)
+```
+
+## Appendix 7
+```{r echo= FALSE, fig.height=10, fig.width=7}
+temp <- wines %>% dplyr::select(-quality) %>% dplyr::mutate(type=as.integer(type)) 
+g1 <- temp %>% ggplot(aes(y=type,x=pH)) + geom_point()+ geom_smooth(method="lm")
+g2 <- temp %>% ggplot(aes(y=type,x=alcohol)) + geom_point()+ geom_smooth(method="lm")
+g3 <- temp %>% ggplot(aes(y=type,x=fixed.acidity)) + geom_point()+ geom_smooth(method="lm")
+g4 <- temp %>% ggplot(aes(y=type,x=volatile.acidity)) + geom_point()+ geom_smooth(method="lm")
+g5 <- temp %>% ggplot(aes(y=type,x=citric.acid)) + geom_point()+ geom_smooth(method="lm")
+g6 <- temp %>% ggplot(aes(y=type,x=residual.sugar)) + geom_point()+ geom_smooth(method="lm")
+g7 <- temp %>% ggplot(aes(y=type,x=chlorides)) + geom_point()+ geom_smooth(method="lm")
+g8 <- temp %>% ggplot(aes(y=type,x=free.sulfur.dioxide)) + geom_point()+ geom_smooth(method="lm")
+g9 <- temp %>% ggplot(aes(y=type,x=total.sulfur.dioxide)) + geom_point()+ geom_smooth(method="lm")
+g10 <- temp %>% ggplot(aes(y=type,x=density)) + geom_point()+ geom_smooth(method="lm")
+g11 <- temp %>% ggplot(aes(y=type,x=sulphates)) + geom_point()+ geom_smooth(method="lm")
+
+grid.arrange(g1,g2,g3,g4,g5,g6,g7,g8,g9,g10,g11, nrow = 4, ncol = 3)
+```
+
+## Appendix 8
+```{r echo = FALSE, fig.height=10}
+b4 <- ggplot(aes(y = residual.sugar, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Residual Sugar, g/L') +
+  ggtitle('Residual sugar') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+
+b5 <- ggplot(aes(y = chlorides, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Chlorides, g sodium chloride/L') +
+  ggtitle('Chlorides') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b8 <- ggplot(aes(y = density, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Density, g/mL') +
+  ggtitle('Density') +
+  theme(text = element_text(size = 10), legend.position = "none")
+
+b6 <- ggplot(aes(y = free.sulfur.dioxide, x = type, fill = type), data = wines) +
+  geom_boxplot() +
+  ylab('Free Sulfur Dioxide, mg/L') +
+  ggtitle('Free sulfur dioxide') + 
+  theme(text = element_text(size = 10), legend.position = "none")
+
+grid.arrange(b4, b5, b6, b8, ncol = 2, nrow = 2, top = "Boxplots of Features")
+```
